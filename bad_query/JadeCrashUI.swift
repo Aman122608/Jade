@@ -267,7 +267,7 @@ struct JadeCrashLogsView: View {
     private func row(for entry: JadeCrashLogEntry) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: entry.symbolName)
-                .foregroundStyle(entry.kind == "Session" ? .secondary : .orange)
+                .foregroundStyle(entry.kind == "Session" ? Color.secondary : Color.orange)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)
