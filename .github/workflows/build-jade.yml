@@ -14,8 +14,9 @@ permissions:
 
 jobs:
   build:
-    # macos-26 ships Xcode 26.x (iOS 26 SDK); the project targets iOS 26.0.
-    runs-on: macos-26
+    # macos-15 (Intel) ships Xcode 26.3 with the iOS 26.2 SDK; the project needs
+    # iOS 26.0+, and macos-26's arm64 pool is badly capacity constrained.
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - name: Checkout
