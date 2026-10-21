@@ -44,6 +44,35 @@ enum JadeCrashBoot {
     }
 }
 
+// MARK: - Scene phase tracking
+
+/// Zero-size probe view: drops the "session active" marker whenever the app
+/// backgrounds cleanly, and restores it on return. Without this, every launch
+/// would look like the previous run crashed.
+struct JadeScenePhaseObserver: View {
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:
+                    JadeCrashMarkSessionActive()
+                    JadeCrashBoot.breadcrumb("scene: active")
+                case .inactive:
+                    JadeCrashBoot.breadcrumb("scene: inactive")
+                case .background:
+                    JadeCrashBoot.breadcrumb("scene: background")
+                    JadeCrashMarkCleanExit()
+                @unknown default:
+                    break
+                }
+            }
+    }
+}
+
 // MARK: - Model
 
 struct JadeCrashLogEntry: Identifiable, Hashable {

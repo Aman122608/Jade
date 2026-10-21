@@ -26,15 +26,32 @@ jobs:
           set -euo pipefail
           echo "Installed Xcode builds:"
           ls -d /Applications/Xcode*.app || true
-          BEST="$(ls -d /Applications/Xcode*.app 2>/dev/null \
-            | sed -E 's#^/Applications/Xcode_?##; s#\.app$##' \
-            | grep -E '^[0-9]+(\.[0-9]+)*$' \
-            | sort -V | tail -1)"
-          echo "Selecting Xcode ${BEST}"
-          sudo xcode-select -s "/Applications/Xcode${BEST}.app/Contents/Developer"
+
+          BEST_VER=""
+          BEST_PATH=""
+          for app in /Applications/Xcode*.app; do
+            base="$(basename "$app")"
+            ver="$(printf '%s' "$base" | sed -E 's#^Xcode_?##; s#\.app$##')"
+            case "$ver" in
+              ""|*[!0-9.]*) continue ;;
+            esac
+            if [ -z "$BEST_VER" ] \
+               || [ "$(printf '%s\n%s\n' "$BEST_VER" "$ver" | sort -V | tail -1)" = "$ver" ]; then
+              BEST_VER="$ver"
+              BEST_PATH="$app"
+            fi
+          done
+
+          if [ -z "$BEST_PATH" ]; then
+            echo "No versioned Xcode found, falling back to the default install"
+            BEST_PATH="/Applications/Xcode.app"
+          fi
+
+          echo "Selecting Xcode ${BEST_VER} at ${BEST_PATH}"
+          sudo xcode-select -s "${BEST_PATH}/Contents/Developer"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
-          echo "DEVELOPER_DIR=/Applications/Xcode${BEST}.app/Contents/Developer" >> "$GITHUB_ENV"
+          echo "DEVELOPER_DIR=${BEST_PATH}/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Build & package IPAs
         env:
