@@ -65,7 +65,7 @@ jobs:
             echo "ICON_COMPOSER=yes" >> "$GITHUB_ENV"
             exit 0
           fi
-          if grep -q 'JadeIcon.icon' build/build.log; then
+          if grep -q 'Could not open .JadeIcon.icon' build/build.log; then
             # actool on this Xcode build cannot compile the Icon Composer bundle
             # (see repo notes). Fall back to the flat AppIcon asset so the IPA
             # still ships with an icon.

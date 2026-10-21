@@ -89,7 +89,8 @@ create_ipa() {
     # Clean stray files (workbuddy memory .md files leaked into bundle)
     rm -f "$app"/*.md
 
-    # plist_set KEY TYPE:VALUE — Set when the key exists, Add when it does not
+    # plist_set KEY "TYPE VALUE" — Set when the key exists, Add when it does not
+    # (PlistBuddy wants the type and value as separate words: "bool true")
     plist_set() {
         /usr/libexec/PlistBuddy -c "Set :$1 $2" "$app/Info.plist" >/dev/null 2>&1 || \
         /usr/libexec/PlistBuddy -c "Add :$1 $2" "$app/Info.plist"
@@ -101,8 +102,8 @@ create_ipa() {
 
     # Expose Documents/ (crash logs) to the Files app + Finder file sharing so
     # reports can be pulled off the device without a cable.
-    plist_set UIFileSharingEnabled bool:true
-    plist_set LSSupportsOpeningDocumentsInPlace bool:true
+    plist_set UIFileSharingEnabled "bool true"
+    plist_set LSSupportsOpeningDocumentsInPlace "bool true"
 
     # Create entitlements (ad-hoc: no team-identifier / application-identifier)
     local ent_file="$work_dir/entitlements.plist"
