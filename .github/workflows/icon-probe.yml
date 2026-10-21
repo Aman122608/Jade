@@ -14,65 +14,95 @@ jobs:
       - name: Select Xcode 26.6
         run: sudo xcode-select -s /Applications/Xcode_26.6.0.app/Contents/Developer
 
-      - name: Probe with the real Xcode actool invocation
+      - name: Bisect icon.json
         run: |
           set -uo pipefail
           python3 - <<'PY'
-          import json, shutil, subprocess, pathlib, os
+          import json, shutil, subprocess, pathlib
 
           assets = "bad_query/Assets.xcassets"
           real_icon = pathlib.Path("bad_query/JadeIcon.icon")
           base = json.loads((real_icon / "icon.json").read_text(encoding="utf-8-sig"))
 
-          def variant_no_features(d):
-              d = json.loads(json.dumps(d))
-              d.pop("features", None)
-              for g in d.get("groups", []):
-                  g.pop("blur-material-specializations", None)
-                  for l in g.get("layers", []):
-                      l.pop("glass", None)
-              return d
-
-          def variant_no_platform(d):
-              d = json.loads(json.dumps(d))
-              d.pop("supported-platforms", None)
-              return d
-
-          def variant_minimal(d):
-              return {
-                  "fill": {"solid": "srgb:0.2,0.7,0.3,1.0"},
-                  "groups": [{
+          crafted = {
+              "fill": {"linear-gradient": [
+                  "srgb:0.40745,0.86382,0.48257,1.00000",
+                  "srgb:0.00000,0.69226,0.20495,1.00000",
+              ]},
+              "groups": [
+                  {
                       "layers": [{
-                          "image-name": "\u9020\u578b4.svg",
-                          "name": "l1",
-                          "position": {"scale": 10, "translation-in-points": [0, 0]},
+                          "image-name": "\u9020\u578b2 (1).svg",
+                          "name": "\u9020\u578b2 (1)",
+                          "position": {"scale": 9, "translation-in-points": [0, 0]},
                       }],
-                      "shadow": {"kind": "neutral", "opacity": 0.5},
+                      "shadow": {"kind": "neutral", "opacity": 0.9},
                       "specular": False,
                       "translucency": {"enabled": False, "value": 0.5},
-                  }],
-              }
-
-          variants = {
-              "1_asis": base,
-              "2_no_features": variant_no_features(base),
-              "3_no_supported_platforms": variant_no_platform(base),
-              "4_minimal": variant_minimal(base),
+                  },
+                  {
+                      "layers": [{
+                          "image-name": "\u9020\u578b4.svg",
+                          "name": "\u9020\u578b4",
+                          "position": {"scale": 10, "translation-in-points": [0, 1]},
+                      }],
+                      "shadow": {"kind": "neutral", "opacity": 0.3},
+                      "specular": False,
+                      "translucency": {"enabled": False, "value": 0.5},
+                  },
+              ],
           }
 
-          def run(icon_path, tag, app_icon="JadeIcon"):
-              out = pathlib.Path(f"/tmp/actool3/{tag}/out")
-              if out.parent.exists():
-                  shutil.rmtree(out.parent)
-              out.mkdir(parents=True)
+          def with_p3(d):
+              d = json.loads(json.dumps(d))
+              d["color-space-for-untagged-svg-colors"] = "display-p3"
+              return d
+
+          def crafted_with_heic(d):
+              d = json.loads(json.dumps(d))
+              d["groups"].append({
+                  "layers": [{
+                      "image-name": "HEIF\u56fe\u50cf.heic",
+                      "name": "HEIF\u56fe\u50cf",
+                      "position": {"scale": 1.2, "translation-in-points": [18, -14]},
+                  }],
+                  "shadow": {"kind": "layer-color", "opacity": 0.6},
+                  "specular": False,
+                  "translucency": {"enabled": False, "value": 0.5},
+              })
+              return d
+
+          def base_without_heic(d):
+              d = json.loads(json.dumps(d))
+              d["groups"] = [g for g in d["groups"]
+                             if not any(l.get("image-name", "").startswith("HEIF") for l in g.get("layers", []))]
+              return d
+
+          variants = {
+              "A_crafted": crafted,
+              "B_crafted_p3": with_p3(crafted),
+              "C_crafted_heic": crafted_with_heic(crafted),
+              "D_base_no_heic": base_without_heic(base),
+          }
+
+          def run(tag, data):
+              work = pathlib.Path(f"/tmp/icons4/{tag}")
+              if work.exists():
+                  shutil.rmtree(work)
+              work.mkdir(parents=True)
+              dst = work / "JadeIcon.icon"
+              shutil.copytree(real_icon, dst)
+              (dst / "icon.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+              out = work / "out"
+              out.mkdir()
               cmd = [
-                  "xcrun", "actool", assets, str(icon_path),
+                  "xcrun", "actool", assets, str(dst),
                   "--compile", str(out),
                   "--output-format", "human-readable-text",
                   "--notices", "--warnings",
-                  "--export-dependency-info", f"/tmp/actool3/{tag}/deps",
-                  "--output-partial-info-plist", f"/tmp/actool3/{tag}/partial.plist",
-                  "--app-icon", app_icon,
+                  "--export-dependency-info", str(work / "deps"),
+                  "--output-partial-info-plist", str(work / "partial.plist"),
+                  "--app-icon", "JadeIcon",
                   "--include-all-app-icons",
                   "--accent-color", "AccentColor",
                   "--compress-pngs",
@@ -86,19 +116,11 @@ jobs:
               r = subprocess.run(cmd, capture_output=True, text=True)
               status = "OK" if r.returncode == 0 else f"FAIL({r.returncode})"
               print(f"\n===== {tag}: {status} =====")
-              for line in ((r.stdout or "") + (r.stderr or "")).strip().splitlines()[-5:]:
+              for line in ((r.stdout or "") + (r.stderr or "")).strip().splitlines()[-6:]:
                   print("   ", line)
+              pngs = sorted(p.name for p in out.rglob("*.png"))
+              print("    png outputs:", pngs[:8])
 
           for tag, data in variants.items():
-              work = pathlib.Path(f"/tmp/icons/{tag}")
-              if work.exists():
-                  shutil.rmtree(work)
-              work.mkdir(parents=True)
-              dst = work / "JadeIcon.icon"
-              shutil.copytree(real_icon, dst)
-              (dst / "icon.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
-              run(dst, tag)
-
-          # Baseline: no Icon Composer bundle at all.
-          run(pathlib.Path("/nonexistent"), "5_no_icon_composer", app_icon="AppIcon")
+              run(tag, data)
           PY
