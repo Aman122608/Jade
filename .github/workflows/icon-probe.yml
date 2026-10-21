@@ -1,0 +1,106 @@
+name: Icon Probe (temporary)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          for app in /Applications/Xcode_2*.app; do :; done
+          sudo xcode-select -s /Applications/Xcode_26.6.0.app/Contents/Developer || true
+          xcodebuild -version
+          xcrun actool --version || true
+
+      - name: Probe .icon variants
+        run: |
+          set -uo pipefail
+          python3 - <<'PY'
+          import json, os, shutil, subprocess, pathlib
+
+          src = pathlib.Path("bad_query/JadeIcon.icon")
+          raw = (src / "icon.json").read_bytes()
+          print("icon.json bytes:", len(raw), "CRLF:", b"\r\n" in raw)
+          print("files:", sorted(p.relative_to(src).as_posix() for p in src.rglob("*")))
+          base = json.loads(raw.decode("utf-8-sig"))
+
+          variants = {}
+          variants["1_asis"] = base
+
+          no_features = json.loads(json.dumps(base))
+          no_features.pop("features", None)
+          variants["2_no_features"] = no_features
+
+          no_glass = json.loads(json.dumps(no_features))
+          for g in no_glass.get("groups", []):
+              for layer in g.get("layers", []):
+                  layer.pop("glass", None)
+          no_glass.pop("fill", None)
+          variants["3_no_features_no_glass"] = no_glass
+
+          minimal = {
+              "fill": {"solid": "srgb:0.2,0.7,0.3,1.0"},
+              "groups": [{
+                  "layers": [{
+                      "image-name": "\u9020\u578b4.svg",
+                      "name": "l1",
+                      "position": {"scale": 1.0, "translation-in-points": [0, 0]},
+                  }],
+                  "shadow": {"kind": "neutral", "opacity": 0.5},
+                  "specular": False,
+                  "translucency": {"enabled": False, "value": 0.5},
+              }],
+          }
+          variants["4_minimal"] = minimal
+
+          for name, data in variants.items():
+              work = pathlib.Path(f"/tmp/probe/{name}")
+              if work.exists():
+                  shutil.rmtree(work)
+              work.mkdir(parents=True)
+              dst = work / "JadeIcon.icon"
+              shutil.copytree(src, dst)
+              (dst / "icon.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+              out = work / "out"
+              out.mkdir()
+              cmd = [
+                  "xcrun", "actool", str(dst),
+                  "--compile", str(out),
+                  "--output-format", "human-readable-text",
+                  "--platform", "iphoneos",
+                  "--minimum-deployment-target", "26.0",
+                  "--app-icon", "JadeIcon",
+                  "--include-all-app-icons",
+                  "--target-device", "iphone",
+              ]
+              r = subprocess.run(cmd, capture_output=True, text=True)
+              status = "OK" if r.returncode == 0 else "FAIL"
+              print(f"\n===== {name}: {status} =====")
+              print((r.stdout or "")[-1500:])
+              print((r.stderr or "")[-2500:])
+          PY
+
+      - name: Probe classic appiconset
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/classic/out
+          python3 - <<'PY'
+          import zlib, struct, pathlib
+          # 1024x1024 solid green PNG, no dependencies
+          w = h = 1024
+          rows = b"".join(b"\x00" + bytes([0x2E, 0xB8, 0x55]) * w for _ in range(h))
+          def chunk(t, d):
+              c = struct.pack(">I", len(d)) + t + d
+              return c + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+          png = (b"\x89PNG\r\n\x1a\n"
+                 + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                 + chunk(b"IDAT", zlib.compress(rows, 6))
+                 + chunk(b"IEND", b""))
+          pathlib.Path("/tmp/classic/out/icon.png").write_bytes(png)
+          print("wrote", len(png), "bytes")
+          PY
+          xcrun --sdk iphoneos --show-sdk-path
