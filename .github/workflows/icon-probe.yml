@@ -1,6 +1,8 @@
 name: Icon Probe (temporary)
 
 on:
+  push:
+    branches: [crash-handler]
   workflow_dispatch:
 
 jobs:
