@@ -1,0 +1,102 @@
+name: Build Jade IPA
+
+# Builds ad-hoc signed Jade.ipa + Jade-MHA.ipa on a macOS runner.
+# Unsigned/ad-hoc IPAs install via TrollStore or a paid developer certificate
+# (see README → Installation).
+
+on:
+  push:
+    branches: [main, crash-handler]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # macos-26 ships Xcode 26.x (iOS 26 SDK); the project targets iOS 26.0.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          echo "Installed Xcode builds:"
+          ls -d /Applications/Xcode*.app || true
+          BEST="$(ls -d /Applications/Xcode*.app 2>/dev/null \
+            | sed -E 's#^/Applications/Xcode(.*)\.app$#\1#' \
+            | grep -E '^[0-9]+(\.[0-9]+)*$' \
+            | sort -V | tail -1)"
+          echo "Selecting Xcode ${BEST}"
+          sudo xcode-select -s "/Applications/Xcode${BEST}.app/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          echo "DEVELOPER_DIR=/Applications/Xcode${BEST}.app/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Build & package IPAs
+        env:
+          # dSYMs so backtraces from the crash handler can be symbolized later.
+          EXTRA_XCODEBUILD_ARGS: "DEBUG_INFORMATION_FORMAT=dwarf-with-dsym"
+        run: |
+          set -euo pipefail
+          chmod +x build_ipa.sh
+          ./build_ipa.sh
+
+      - name: Collect dSYMs
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p build/symbols
+          find build/DerivedData/Build/Products -name '*.dSYM' -maxdepth 4 \
+            -exec cp -R {} build/symbols/ \; 2>/dev/null || true
+          ls -R build/symbols || true
+
+      - name: Show build log tail
+        if: always()
+        run: tail -n 120 build/build.log || true
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jade-IPA
+          path: build/*.ipa
+          if-no-files-found: error
+
+      - name: Upload dSYM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jade-dSYM
+          path: build/symbols
+          if-no-files-found: warn
+
+      - name: Upload full build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jade-build-log
+          path: build/build.log
+          if-no-files-found: warn
+
+      - name: Create release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Jade build #${{ github.run_number }}
+          body: |
+            Auto-built from `${{ github.sha }}` on Xcode (iOS 26 SDK).
+
+            | IPA | Bundle ID | Use |
+            |-----|-----------|-----|
+            | `Jade.ipa` | `com.jason.Jade` | Standard bad_query escape |
+            | `Jade-MHA.ipa` | `com.apple.mobile.MobileHouseArrest` | Full container access (TrollStore / paid cert only) |
+
+            Ad-hoc signed. Crash logs land in the app's `Documents/JadeCrashLogs`
+            and are reachable from Settings → Diagnostics → Crash Logs.
+          files: |
+            build/Jade.ipa
+            build/Jade-MHA.ipa
+          prerelease: true

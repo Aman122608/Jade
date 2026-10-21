@@ -129,3 +129,6 @@ static NSString *AppNameForBundleID(NSString *bundleId) {
 // only, no token activation — avoids iOS 26 activation failures). The actual
 // sandbox extension is activated on-demand when the user navigates into a
 // container (via ensureMHAExtension in BQFileSystem.swift).
+
+// MARK: - Crash / diagnostics logging (JadeCrash.c)
+#import "JadeCrash.h"

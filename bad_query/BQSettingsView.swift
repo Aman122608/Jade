@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct BQSettingsView: View {
     @Environment(BQFileSystemModel.self) private var model
@@ -52,6 +53,23 @@ struct BQSettingsView: View {
                         Label("Release All Extensions", systemImage: "xmark.shield")
                     }
                     .disabled(model.extensionCount == 0)
+                }
+                Section {
+                    JadeCrashLogsSettingsRow()
+                    Button {
+                        JadeCrashBoot.breadcrumb("diagnostics: manual snapshot requested")
+                        JadeCrashWriteReport("note", "Manual snapshot requested from Settings → Diagnostics.")
+                        UIPasteboard.general.string = JadeCrashLogEntry.hermesBundle(
+                            reports: JadeCrashLogEntry.loadAll(),
+                            session: JadeCrashLogEntry.loadAll().first { $0.kind == "Session" }
+                        )
+                    } label: {
+                        Label("Copy Diagnostics for Hermes", systemImage: "ladybug")
+                    }
+                } header: {
+                    Text("Diagnostics")
+                } footer: {
+                    Text("Crash reports and breadcrumbs are written to Documents/JadeCrashLogs. If Jade dies, relaunch it and copy the newest report here.")
                 }
                 Section("Utilities") {
                     Button {

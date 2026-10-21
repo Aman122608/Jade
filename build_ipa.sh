@@ -16,11 +16,16 @@ set -euo pipefail
 # === Config ===
 PROJECT="Jade.xcodeproj"
 SCHEME="Jade"
-CONFIG="Debug"
+CONFIG="${CONFIG:-Debug}"
 BUILD_DIR="build"
+# Extra xcodebuild settings, e.g. EXTRA_XCODEBUILD_ARGS="FOO=1 BAR=2"
+EXTRA_XCODEBUILD_ARGS="${EXTRA_XCODEBUILD_ARGS:-}"
 
 # === Find Xcode ===
-if [ -d "/Applications/Xcode-beta.app" ]; then
+# An explicit DEVELOPER_DIR (CI sets it via xcode-select) always wins.
+if [ -n "${DEVELOPER_DIR:-}" ] && [ -d "${DEVELOPER_DIR}" ]; then
+    :
+elif [ -d "/Applications/Xcode-beta.app" ]; then
     export DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"
 elif [ -d "/Applications/Xcode.app" ]; then
     export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
@@ -28,6 +33,7 @@ else
     echo "Error: Xcode not found" >&2
     exit 1
 fi
+echo "Using DEVELOPER_DIR=$DEVELOPER_DIR"
 
 # === Step 1: Build unsigned .app ===
 echo "=== Building unsigned .app ($CONFIG) ==="
@@ -44,6 +50,7 @@ xcodebuild build \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGN_IDENTITY="" \
     DEVELOPMENT_TEAM="" \
+    $EXTRA_XCODEBUILD_ARGS \
     2>&1 | tee "$BUILD_LOG" | grep -E "(error:|BUILD SUCCEEDED|BUILD FAILED)" || true
 
 if ! grep -q "BUILD SUCCEEDED" "$BUILD_LOG"; then
@@ -82,9 +89,20 @@ create_ipa() {
     # Clean stray files (workbuddy memory .md files leaked into bundle)
     rm -f "$app"/*.md
 
+    # plist_set KEY TYPE:VALUE — Set when the key exists, Add when it does not
+    plist_set() {
+        /usr/libexec/PlistBuddy -c "Set :$1 $2" "$app/Info.plist" >/dev/null 2>&1 || \
+        /usr/libexec/PlistBuddy -c "Add :$1 $2" "$app/Info.plist"
+    }
+
     # Modify Info.plist: bundle ID + display name
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${bundle_id}" "$app/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${display_name}" "$app/Info.plist"
+
+    # Expose Documents/ (crash logs) to the Files app + Finder file sharing so
+    # reports can be pulled off the device without a cable.
+    plist_set UIFileSharingEnabled bool:true
+    plist_set LSSupportsOpeningDocumentsInPlace bool:true
 
     # Create entitlements (ad-hoc: no team-identifier / application-identifier)
     local ent_file="$work_dir/entitlements.plist"

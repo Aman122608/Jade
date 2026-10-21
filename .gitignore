@@ -1,1 +1,6 @@
 concept/*
+build/DerivedData*
+build/symbols/
+build/*.ipa
+build/Jade/
+build/Jade-MHA/

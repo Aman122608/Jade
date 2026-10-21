@@ -268,6 +268,9 @@ final class BQFileSystemModel {
     func appendLog(_ message: String) {
         log.append("[\(Self.logFormatter.string(from: Date()))] \(message)")
         if log.count > 400 { log.removeFirst(log.count - 400) }
+        // Mirror the activity log into the on-disk breadcrumb trail so a crash
+        // report shows what the app was doing right before it died.
+        JadeCrashBreadcrumbString(message)
     }
 
     // MARK: Sandbox extensions
