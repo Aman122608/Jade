@@ -84,6 +84,9 @@
   <div class="card">
     <label>Latest release IPAs (no token needed)</label>
     <div id="releases"><p class="hint">Loading…</p></div>
+
+    <label>Wandering builds (no token needed)</label>
+    <div id="wandering"><p class="hint">Loading…</p></div>
   </div>
 
 <script>
@@ -178,6 +181,7 @@ async function poll() {
 
     if (run.status !== "completed") timer = setTimeout(poll, 12000);
     else loadReleases();
+loadWandering();
   } catch (e) {
     setStatus("bad", "Poll failed: " + e.message);
     $("build").disabled = false;
@@ -208,6 +212,44 @@ async function loadReleases() {
   }
 }
 
+const WANDERING_REPO = "Aman122608/wandering";
+
+async function loadWandering() {
+  const box = $("wandering");
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${WANDERING_REPO}/releases?per_page=5`,
+      { headers: { Accept: "application/vnd.github+json" } }
+    );
+    if (!res.ok) throw new Error(res.status + " " + res.statusText);
+    const rels = await res.json();
+    const withIpa = rels.filter(r => r.assets.some(a => a.name.endsWith(".ipa")));
+    if (!withIpa.length) {
+      box.innerHTML = '<p class="hint">No Wandering builds published yet.</p>';
+      return;
+    }
+    box.innerHTML = "";
+    for (const rel of withIpa) {
+      const head = document.createElement("p");
+      head.className = "meta";
+      const when = new Date(rel.published_at).toLocaleString();
+      head.textContent = `${rel.tag_name} · ${when}` + (rel.prerelease ? " · pre-release" : "");
+      box.appendChild(head);
+      for (const a of rel.assets) {
+        if (!a.name.endsWith(".ipa")) continue;
+        const link = document.createElement("a");
+        link.className = "download";
+        link.href = a.browser_download_url;
+        link.textContent = `${a.name} · ${(a.size / 1048576).toFixed(2)} MB`;
+        box.appendChild(link);
+      }
+    }
+  } catch (e) {
+    box.innerHTML = '<p class="hint">Could not load Wandering builds: '
+      + e.message + "</p>";
+  }
+}
+
 $("save").onclick = () => {
   const v = $("pat").value.trim();
   if (!v) return;
@@ -217,6 +259,7 @@ $("save").onclick = () => {
   setStatus("", "Token saved");
   poll();
   loadReleases();
+loadWandering();
 };
 $("build").onclick = startBuild;
 $("refresh").onclick = poll;
@@ -227,6 +270,7 @@ $("openGh").onclick = () => {
 
 if (token) { poll(); } else { setStatus("", "Add a token to start"); }
 loadReleases();
+loadWandering();
 </script>
 </body>
 </html>
