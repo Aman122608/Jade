@@ -218,12 +218,18 @@ async function loadWandering() {
   const box = $("wandering");
   try {
     const res = await fetch(
-      `https://api.github.com/repos/${WANDERING_REPO}/releases?per_page=5`,
+      `https://api.github.com/repos/${WANDERING_REPO}/releases?per_page=30`,
       { headers: { Accept: "application/vnd.github+json" } }
     );
     if (!res.ok) throw new Error(res.status + " " + res.statusText);
     const rels = await res.json();
-    const withIpa = rels.filter(r => r.assets.some(a => a.name.endsWith(".ipa")));
+    // The API does not order these by date (releases published from CI come back
+    // in tag order), so sort explicitly and keep the newest few.
+    const stamp = r => new Date(r.published_at || r.created_at).getTime();
+    const withIpa = rels
+      .filter(r => r.assets.some(a => a.name.endsWith(".ipa")))
+      .sort((a, b) => stamp(b) - stamp(a))
+      .slice(0, 6);
     if (!withIpa.length) {
       box.innerHTML = '<p class="hint">No Wandering builds published yet.</p>';
       return;
