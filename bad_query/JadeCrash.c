@@ -34,6 +34,7 @@
 #define JADE_MAX_REPORTS   30
 #define JADE_MAX_FRAMES    128
 #define JADE_CONTEXT_MAX   1024
+#define JADE_SESSION_LOG_MAX (2UL * 1024UL * 1024UL)
 
 static char g_dir[JADE_PATH_MAX];
 static char g_session_log[JADE_PATH_MAX];
@@ -41,6 +42,7 @@ static char g_marker[JADE_PATH_MAX];
 static char g_context[JADE_CONTEXT_MAX];
 static volatile int g_log_fd = -1;
 static volatile int g_installed = 0;
+static volatile unsigned long g_log_bytes = 0;
 static char g_alt_stack[64 * 1024];
 
 // ---------------------------------------------------------------------------
@@ -333,7 +335,16 @@ void JadeCrashBreadcrumbString(const char *line) {
     int n = snprintf(buf, sizeof buf, "%s  %s\n", ts, line);
     if (n > 0) {
         size_t len = (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1;
-        write(g_log_fd, buf, len);
+        ssize_t wrote = write(g_log_fd, buf, len);
+        if (wrote > 0) {
+            g_log_bytes += (unsigned long)wrote;
+            // Keep the session log bounded: drop the head once it gets large,
+            // so a long session cannot fill the container.
+            if (g_log_bytes > JADE_SESSION_LOG_MAX) {
+                ftruncate(g_log_fd, 0);
+                g_log_bytes = 0;
+            }
+        }
     }
 }
 
