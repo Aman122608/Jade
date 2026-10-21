@@ -6,7 +6,7 @@ name: Build Jade IPA
 
 on:
   push:
-    branches: [main, crash-handler]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
