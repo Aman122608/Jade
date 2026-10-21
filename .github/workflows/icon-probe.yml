@@ -1,0 +1,54 @@
+name: Icon Probe (temporary)
+
+on:
+  push:
+    branches: [crash-handler]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.0.app/Contents/Developer
+
+      - name: Probe actool flag combinations
+        run: |
+          set -uo pipefail
+          python3 - <<'PY'
+          import shutil, subprocess, pathlib
+
+          assets = "bad_query/Assets.xcassets"
+          icon = "bad_query/JadeIcon.icon"
+          base = ["xcrun", "actool"]
+          common = ["--output-format", "human-readable-text", "--compress-pngs",
+                    "--enable-on-demand-resources", "YES", "--development-region", "en",
+                    "--minimum-deployment-target", "26.0", "--platform", "iphoneos",
+                    "--bundle-identifier", "com.jason.Jade", "--target-device", "iphone",
+                    "--target-device", "ipad"]
+
+          cases = {
+              "a_icon_only_full_flags": (base + [icon], common + ["--app-icon", "JadeIcon", "--include-all-app-icons", "--accent-color", "AccentColor"]),
+              "b_both_full_flags": (base + [assets, icon], common + ["--app-icon", "JadeIcon", "--include-all-app-icons", "--accent-color", "AccentColor"]),
+              "c_both_no_include_all": (base + [assets, icon], common + ["--app-icon", "JadeIcon", "--accent-color", "AccentColor"]),
+              "d_both_no_app_icon_flag": (base + [assets, icon], common + ["--include-all-app-icons", "--accent-color", "AccentColor"]),
+              "e_both_no_accent": (base + [assets, icon], common + ["--app-icon", "JadeIcon", "--include-all-app-icons"]),
+              "f_assets_only": (base + [assets], common + ["--app-icon", "AppIcon", "--include-all-app-icons", "--accent-color", "AccentColor"]),
+          }
+
+          for name, (cmd_head, flags) in cases.items():
+              out = pathlib.Path(f"/tmp/actool/{name}")
+              if out.exists():
+                  shutil.rmtree(out)
+              out.mkdir(parents=True)
+              cmd = cmd_head + ["--compile", str(out)] + flags
+              r = subprocess.run(cmd, capture_output=True, text=True)
+              status = "OK" if r.returncode == 0 else f"FAIL({r.returncode})"
+              print(f"\n===== {name}: {status} =====")
+              tail_out = (r.stdout or "").strip().splitlines()[-6:]
+              tail_err = (r.stderr or "").strip().splitlines()[-8:]
+              for line in tail_out + tail_err:
+                  print("   ", line)
+          PY
