@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Jade Build">
+<meta name="theme-color" content="#0b1410">
+<title>Jade Build</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b1410; --card:#12211a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 20px 16px 40px;
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    background: radial-gradient(120% 80% at 50% 0%, #16301f 0%, #0b1410 55%);
+    color: #e8f5ec; min-height: 100vh;
+  }
+  h1 { font-size: 22px; margin: 4px 0 2px; letter-spacing: .2px; }
+  .sub { color: #7ea28d; font-size: 13px; margin: 0 0 18px; }
+  .card { background: #12211a; border: 1px solid #1e3528; border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: #7ea28d; margin-bottom: 8px; }
+  input[type=password], input[type=text] {
+    width: 100%; padding: 13px 14px; border-radius: 12px; border: 1px solid #24402f;
+    background: #0d1a13; color: #e8f5ec; font: 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  button {
+    width: 100%; padding: 16px; margin-top: 12px; border: 0; border-radius: 14px;
+    font: 600 17px/1 -apple-system, system-ui, sans-serif; color: #06120b;
+    background: linear-gradient(180deg, #68dc7b, #00b134);
+  }
+  button:disabled { opacity: .45; }
+  button.ghost { background: #16281d; color: #c9e6d3; border: 1px solid #24402f; font-weight: 500; font-size: 15px; padding: 13px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .status { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #4b6b58; flex: 0 0 auto; }
+  .dot.queued { background: #d9a441; }
+  .dot.running { background: #4aa8ff; animation: pulse 1.4s infinite; }
+  .dot.ok { background: #35d06a; }
+  .dot.bad { background: #ff5a5a; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+  .steps { margin: 12px 0 0; padding: 0; list-style: none; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .steps li { display: flex; gap: 8px; padding: 3px 0; color: #86a895; }
+  .steps li .m { width: 14px; flex: 0 0 14px; text-align: center; }
+  .steps li.done { color: #b9dcc6; }
+  .steps li.done .m { color: #35d06a; }
+  .steps li.fail { color: #ffb3b3; }
+  .steps li.fail .m { color: #ff5a5a; }
+  .steps li.active { color: #e8f5ec; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: #0d1a13; padding: 2px 6px; border-radius: 6px; }
+  .hint { color: #6d8f7b; font-size: 12.5px; margin-top: 10px; }
+  a { color: #7fe39c; }
+  .meta { font-size: 12.5px; color: #7ea28d; margin-top: 10px; }
+  .download { display: block; text-align: center; text-decoration: none; padding: 16px; border-radius: 14px;
+    background: #16301f; border: 1px solid #2c5a3f; color: #b8f0c9; font-weight: 600; margin-top: 10px; }
+  .download + .download { margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Jade Build</h1>
+  <p class="sub">Triggers the Xcode build on GitHub Actions and hands back the IPA.</p>
+
+  <div class="card" id="tokenCard">
+    <label for="pat">GitHub token (repo + workflow scope)</label>
+    <input id="pat" type="password" placeholder="ghp_… or github_pat_…" autocomplete="off" spellcheck="false">
+    <button id="save">Save token on this device</button>
+    <p class="hint">Stored in this browser's localStorage only. Fine-grained token needs <code>Actions: read/write</code> and <code>Contents: read/write</code> on Aman122608/Jade.</p>
+  </div>
+
+  <div class="card">
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Idle</span></div>
+    <ul class="steps" id="steps"></ul>
+    <div class="row">
+      <button id="build">Build Jade.ipa</button>
+    </div>
+    <div class="row">
+      <button class="ghost" id="refresh">Refresh status</button>
+      <button class="ghost" id="openGh">Open run on GitHub</button>
+    </div>
+    <p class="meta" id="meta"></p>
+  </div>
+
+  <div class="card">
+    <label>Latest release IPAs (no token needed)</label>
+    <div id="releases"><p class="hint">Loading…</p></div>
+  </div>
+
+<script>
+const REPO = "Aman122608/Jade";
+const WORKFLOW = "build-jade.yml";
+const REF = "crash-handler";
+const API = "https://api.github.com";
+
+const $ = (id) => document.getElementById(id);
+let token = localStorage.getItem("jade_pat") || "";
+let timer = null;
+let currentRun = null;
+
+function setStatus(kind, text) {
+  $("dot").className = "dot " + kind;
+  $("statusText").textContent = text;
+}
+
+function renderSteps(jobs) {
+  const ul = $("steps");
+  ul.innerHTML = "";
+  if (!jobs || !jobs.length) return;
+  for (const job of jobs) {
+    for (const step of job.steps || []) {
+      const li = document.createElement("li");
+      let mark = "·", cls = "";
+      if (step.status === "completed") {
+        if (step.conclusion === "success") { mark = "✓"; cls = "done"; }
+        else if (step.conclusion === "skipped") { mark = "–"; }
+        else { mark = "✕"; cls = "fail"; }
+      } else if (step.status === "in_progress") { mark = "▸"; cls = "active"; }
+      li.className = cls;
+      li.innerHTML = `<span class="m">${mark}</span><span>${step.name}</span>`;
+      ul.appendChild(li);
+    }
+  }
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: "Bearer " + token,
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(opts.headers || {}),
+    },
+  });
+  if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 200));
+  return res.status === 204 ? null : res.json();
+}
+
+async function startBuild() {
+  if (!token) { setStatus("bad", "Add a token first"); return; }
+  $("build").disabled = true;
+  try {
+    setStatus("queued", "Dispatching workflow…");
+    await api(`/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`, {
+      method: "POST",
+      body: JSON.stringify({ ref: REF }),
+    });
+    setStatus("running", "Queued — GitHub is picking a macOS runner");
+    await new Promise((r) => setTimeout(r, 4000));
+    poll();
+  } catch (e) {
+    setStatus("bad", "Dispatch failed: " + e.message);
+    $("build").disabled = false;
+  }
+}
+
+async function poll() {
+  clearTimeout(timer);
+  if (!token) return;
+  try {
+    const runs = await api(`/repos/${REPO}/actions/runs?branch=${REF}&per_page=5`);
+    const run = runs.workflow_runs.find((r) => r.path.endsWith(WORKFLOW)) || runs.workflow_runs[0];
+    if (!run) { setStatus("", "No runs yet"); $("build").disabled = false; return; }
+    currentRun = run;
+
+    if (run.status === "completed") {
+      const ok = run.conclusion === "success";
+      setStatus(ok ? "ok" : "bad", ok ? "Build finished — IPA ready" : "Build failed (" + run.conclusion + ")");
+      $("build").disabled = false;
+    } else if (run.status === "in_progress") {
+      setStatus("running", "Building on macOS runner…");
+    } else {
+      setStatus("queued", "Queued" + (run.status === "waiting" ? " (waiting for approval)" : " — waiting for a macOS runner"));
+    }
+
+    $("meta").textContent = `run #${run.run_number} · ${run.head_branch} · ${new Date(run.created_at).toLocaleString()}`;
+
+    const jobs = await api(`/repos/${REPO}/actions/runs/${run.id}/jobs`);
+    renderSteps(jobs.jobs);
+
+    if (run.status !== "completed") timer = setTimeout(poll, 12000);
+    else loadReleases();
+  } catch (e) {
+    setStatus("bad", "Poll failed: " + e.message);
+    $("build").disabled = false;
+  }
+}
+
+async function loadReleases() {
+  try {
+    const rels = await api(`/repos/${REPO}/releases?per_page=3`);
+    const box = $("releases");
+    if (!rels.length) { box.innerHTML = '<p class="hint">No releases yet.</p>'; return; }
+    box.innerHTML = "";
+    for (const rel of rels) {
+      const head = document.createElement("p");
+      head.className = "meta";
+      head.textContent = rel.name + " · " + new Date(rel.published_at).toLocaleDateString();
+      box.appendChild(head);
+      for (const a of rel.assets) {
+        const link = document.createElement("a");
+        link.className = "download";
+        link.href = a.browser_download_url;
+        link.textContent = `${a.name} · ${(a.size / 1048576).toFixed(1)} MB`;
+        box.appendChild(link);
+      }
+    }
+  } catch (e) {
+    $("releases").innerHTML = '<p class="hint">Could not load releases: ' + e.message + "</p>";
+  }
+}
+
+$("save").onclick = () => {
+  const v = $("pat").value.trim();
+  if (!v) return;
+  token = v;
+  localStorage.setItem("jade_pat", v);
+  $("pat").value = "";
+  setStatus("", "Token saved");
+  poll();
+  loadReleases();
+};
+$("build").onclick = startBuild;
+$("refresh").onclick = poll;
+$("openGh").onclick = () => {
+  const url = currentRun ? currentRun.html_url : `https://github.com/${REPO}/actions`;
+  window.open(url, "_blank");
+};
+
+if (token) { poll(); } else { setStatus("", "Add a token to start"); }
+loadReleases();
+</script>
+</body>
+</html>
