@@ -14,41 +14,91 @@ jobs:
       - name: Select Xcode 26.6
         run: sudo xcode-select -s /Applications/Xcode_26.6.0.app/Contents/Developer
 
-      - name: Probe actool flag combinations
+      - name: Probe with the real Xcode actool invocation
         run: |
           set -uo pipefail
           python3 - <<'PY'
-          import shutil, subprocess, pathlib
+          import json, shutil, subprocess, pathlib, os
 
           assets = "bad_query/Assets.xcassets"
-          icon = "bad_query/JadeIcon.icon"
-          base = ["xcrun", "actool"]
-          common = ["--output-format", "human-readable-text", "--compress-pngs",
-                    "--enable-on-demand-resources", "YES", "--development-region", "en",
-                    "--minimum-deployment-target", "26.0", "--platform", "iphoneos",
-                    "--bundle-identifier", "com.jason.Jade", "--target-device", "iphone",
-                    "--target-device", "ipad"]
+          real_icon = pathlib.Path("bad_query/JadeIcon.icon")
+          base = json.loads((real_icon / "icon.json").read_text(encoding="utf-8-sig"))
 
-          cases = {
-              "a_icon_only_full_flags": (base + [icon], common + ["--app-icon", "JadeIcon", "--include-all-app-icons", "--accent-color", "AccentColor"]),
-              "b_both_full_flags": (base + [assets, icon], common + ["--app-icon", "JadeIcon", "--include-all-app-icons", "--accent-color", "AccentColor"]),
-              "c_both_no_include_all": (base + [assets, icon], common + ["--app-icon", "JadeIcon", "--accent-color", "AccentColor"]),
-              "d_both_no_app_icon_flag": (base + [assets, icon], common + ["--include-all-app-icons", "--accent-color", "AccentColor"]),
-              "e_both_no_accent": (base + [assets, icon], common + ["--app-icon", "JadeIcon", "--include-all-app-icons"]),
-              "f_assets_only": (base + [assets], common + ["--app-icon", "AppIcon", "--include-all-app-icons", "--accent-color", "AccentColor"]),
+          def variant_no_features(d):
+              d = json.loads(json.dumps(d))
+              d.pop("features", None)
+              for g in d.get("groups", []):
+                  g.pop("blur-material-specializations", None)
+                  for l in g.get("layers", []):
+                      l.pop("glass", None)
+              return d
+
+          def variant_no_platform(d):
+              d = json.loads(json.dumps(d))
+              d.pop("supported-platforms", None)
+              return d
+
+          def variant_minimal(d):
+              return {
+                  "fill": {"solid": "srgb:0.2,0.7,0.3,1.0"},
+                  "groups": [{
+                      "layers": [{
+                          "image-name": "\u9020\u578b4.svg",
+                          "name": "l1",
+                          "position": {"scale": 10, "translation-in-points": [0, 0]},
+                      }],
+                      "shadow": {"kind": "neutral", "opacity": 0.5},
+                      "specular": False,
+                      "translucency": {"enabled": False, "value": 0.5},
+                  }],
+              }
+
+          variants = {
+              "1_asis": base,
+              "2_no_features": variant_no_features(base),
+              "3_no_supported_platforms": variant_no_platform(base),
+              "4_minimal": variant_minimal(base),
           }
 
-          for name, (cmd_head, flags) in cases.items():
-              out = pathlib.Path(f"/tmp/actool/{name}")
-              if out.exists():
-                  shutil.rmtree(out)
+          def run(icon_path, tag, app_icon="JadeIcon"):
+              out = pathlib.Path(f"/tmp/actool3/{tag}/out")
+              if out.parent.exists():
+                  shutil.rmtree(out.parent)
               out.mkdir(parents=True)
-              cmd = cmd_head + ["--compile", str(out)] + flags
+              cmd = [
+                  "xcrun", "actool", assets, str(icon_path),
+                  "--compile", str(out),
+                  "--output-format", "human-readable-text",
+                  "--notices", "--warnings",
+                  "--export-dependency-info", f"/tmp/actool3/{tag}/deps",
+                  "--output-partial-info-plist", f"/tmp/actool3/{tag}/partial.plist",
+                  "--app-icon", app_icon,
+                  "--include-all-app-icons",
+                  "--accent-color", "AccentColor",
+                  "--compress-pngs",
+                  "--enable-on-demand-resources", "YES",
+                  "--development-region", "en",
+                  "--target-device", "iphone", "--target-device", "ipad",
+                  "--minimum-deployment-target", "26.0",
+                  "--platform", "iphoneos",
+                  "--bundle-identifier", "com.jason.Jade",
+              ]
               r = subprocess.run(cmd, capture_output=True, text=True)
               status = "OK" if r.returncode == 0 else f"FAIL({r.returncode})"
-              print(f"\n===== {name}: {status} =====")
-              tail_out = (r.stdout or "").strip().splitlines()[-6:]
-              tail_err = (r.stderr or "").strip().splitlines()[-8:]
-              for line in tail_out + tail_err:
+              print(f"\n===== {tag}: {status} =====")
+              for line in ((r.stdout or "") + (r.stderr or "")).strip().splitlines()[-5:]:
                   print("   ", line)
+
+          for tag, data in variants.items():
+              work = pathlib.Path(f"/tmp/icons/{tag}")
+              if work.exists():
+                  shutil.rmtree(work)
+              work.mkdir(parents=True)
+              dst = work / "JadeIcon.icon"
+              shutil.copytree(real_icon, dst)
+              (dst / "icon.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+              run(dst, tag)
+
+          # Baseline: no Icon Composer bundle at all.
+          run(pathlib.Path("/nonexistent"), "5_no_icon_composer", app_icon="AppIcon")
           PY
