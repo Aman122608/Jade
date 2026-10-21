@@ -27,7 +27,7 @@ jobs:
           echo "Installed Xcode builds:"
           ls -d /Applications/Xcode*.app || true
           BEST="$(ls -d /Applications/Xcode*.app 2>/dev/null \
-            | sed -E 's#^/Applications/Xcode(.*)\.app$#\1#' \
+            | sed -E 's#^/Applications/Xcode_?##; s#\.app$##' \
             | grep -E '^[0-9]+(\.[0-9]+)*$' \
             | sort -V | tail -1)"
           echo "Selecting Xcode ${BEST}"
