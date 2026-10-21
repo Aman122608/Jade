@@ -58,9 +58,24 @@ jobs:
           # dSYMs so backtraces from the crash handler can be symbolized later.
           EXTRA_XCODEBUILD_ARGS: "DEBUG_INFORMATION_FORMAT=dwarf-with-dsym"
         run: |
-          set -euo pipefail
+          set -uo pipefail
           chmod +x build_ipa.sh
-          ./build_ipa.sh
+          if ./build_ipa.sh; then
+            echo "ICON_COMPOSER=yes" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if grep -q 'JadeIcon.icon' build/build.log; then
+            # actool on this Xcode build cannot compile the Icon Composer bundle
+            # (see repo notes). Fall back to the flat AppIcon asset so the IPA
+            # still ships with an icon.
+            echo "::warning::Icon Composer bundle failed to compile; rebuilding with the flat AppIcon asset"
+            mv bad_query/JadeIcon.icon "${RUNNER_TEMP}/JadeIcon.icon"
+            EXTRA_XCODEBUILD_ARGS="DEBUG_INFORMATION_FORMAT=dwarf-with-dsym ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon" \
+              ./build_ipa.sh
+            echo "ICON_COMPOSER=no" >> "$GITHUB_ENV"
+          else
+            exit 1
+          fi
 
       - name: Collect dSYMs
         if: always()
