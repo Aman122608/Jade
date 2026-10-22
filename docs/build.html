@@ -55,6 +55,14 @@
   .download { display: block; text-align: center; text-decoration: none; padding: 16px; border-radius: 14px;
     background: #16301f; border: 1px solid #2c5a3f; color: #b8f0c9; font-weight: 600; margin-top: 10px; }
   .download + .download { margin-top: 8px; }
+.notes { max-height: 420px; overflow-y: auto; padding-right: 6px; }
+  .notes h2, .notes h3 { font-size: 15px; margin: 18px 0 6px; }
+  .notes h3:first-child { margin-top: 4px; }
+  .notes h4 { font-size: 13px; margin: 12px 0 4px; color: #9d948b; }
+  .notes p { margin: 6px 0; font-size: 13px; }
+  .notes ul { margin: 6px 0 6px 18px; }
+  .notes li { font-size: 13px; margin: 3px 0; border: 0; padding: 0; display: list-item; }
+  .notes code { font-size: 12px; }
 </style>
 </head>
 <body>
@@ -84,6 +92,9 @@
   <div class="card">
     <label>Latest release IPAs (no token needed)</label>
     <div id="releases"><p class="hint">Loading…</p></div>
+
+    <label>Release notes — what changed, and what to check</label>
+    <div id="notes"><p class="hint">Loading…</p></div>
 
     <label>Wandering builds (no token needed)</label>
     <div id="wandering"><p class="hint">Loading…</p></div>
@@ -182,6 +193,7 @@ async function poll() {
     if (run.status !== "completed") timer = setTimeout(poll, 12000);
     else loadReleases();
 loadWandering();
+loadNotes();
   } catch (e) {
     setStatus("bad", "Poll failed: " + e.message);
     $("build").disabled = false;
@@ -213,6 +225,47 @@ async function loadReleases() {
 }
 
 const WANDERING_REPO = "Aman122608/wandering";
+const NOTES_URL = `https://raw.githubusercontent.com/${WANDERING_REPO}/main/RELEASES.md`;
+
+// Deliberately tiny: headings, bold, inline code, bullets, paragraphs. Enough for
+// release notes, and no dependency to break.
+function renderMarkdown(text) {
+  const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = t => esc(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+
+  const out = [];
+  let list = false;
+  const closeList = () => { if (list) { out.push("</ul>"); list = false; } };
+
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    if (!line.trim()) { closeList(); continue; }
+    if (/^###\s/.test(line)) { closeList(); out.push(`<h4>${inline(line.slice(4))}</h4>`); }
+    else if (/^##\s/.test(line)) { closeList(); out.push(`<h3>${inline(line.slice(3))}</h3>`); }
+    else if (/^#\s/.test(line)) { closeList(); out.push(`<h2>${inline(line.slice(2))}</h2>`); }
+    else if (/^[-*]\s/.test(line)) {
+      if (!list) { out.push("<ul>"); list = true; }
+      out.push(`<li>${inline(line.replace(/^[-*]\s+/, ""))}</li>`);
+    } else { closeList(); out.push(`<p>${inline(line)}</p>`); }
+  }
+  closeList();
+  return out.join("");
+}
+
+async function loadNotes() {
+  const box = $("notes");
+  try {
+    const res = await fetch(NOTES_URL + "?v=" + Date.now());
+    if (!res.ok) throw new Error(res.status + " " + res.statusText);
+    const text = await res.text();
+    box.innerHTML = '<div class="notes">' + renderMarkdown(text) + "</div>";
+  } catch (e) {
+    box.innerHTML = '<p class="hint">Could not load release notes: ' + e.message
+      + ' — open <a href="' + NOTES_URL + '">RELEASES.md</a>.</p>';
+  }
+}
 
 async function loadWandering() {
   const box = $("wandering");
@@ -266,6 +319,7 @@ $("save").onclick = () => {
   poll();
   loadReleases();
 loadWandering();
+loadNotes();
 };
 $("build").onclick = startBuild;
 $("refresh").onclick = poll;
@@ -277,6 +331,7 @@ $("openGh").onclick = () => {
 if (token) { poll(); } else { setStatus("", "Add a token to start"); }
 loadReleases();
 loadWandering();
+loadNotes();
 </script>
 </body>
 </html>
